@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Claude Usage Tracker",
   "version": "0.1.0",
-  "description": "Monitor your Claude.ai message limits and track daily usage stats in real-time.",
+  "description": "Monitor your Claude.ai message limits and track session and weekly usage stats in real-time.",
   "permissions": ["storage", "alarms"],
   "host_permissions": ["https://claude.ai/*"],
   "icons": {
@@ -22,12 +22,22 @@
     },
     {
       "matches": ["https://claude.ai/*"],
-      "js": ["content.js", "overlay.js"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": ["overlay.js"],
       "run_at": "document_idle"
     }
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Claude Usage Tracker"
+    "default_title": "Claude Usage Tracker",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   }
 }
