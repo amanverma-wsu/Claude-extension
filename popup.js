@@ -1,16 +1,19 @@
 const $ = (id) => document.getElementById(id);
 
-const fmtDuration = (ms) => {
+const fmtDur = (ms) => {
+  if (ms == null) return "--";
   if (ms <= 0) return "now";
   const s = Math.floor(ms / 1000);
-  const h = Math.floor(s / 3600);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
   const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
   if (h > 0) return `${h}h ${m}m`;
   if (m > 0) return `${m}m`;
   return `${s}s`;
 };
 
-const fmtRelative = (ts) => {
+const fmtRel = (ts) => {
   if (!ts) return "";
   const diff = Date.now() - ts;
   if (diff < 60_000) return "just now";
@@ -18,43 +21,45 @@ const fmtRelative = (ts) => {
   return `${Math.floor(diff / 3_600_000)}h ago`;
 };
 
+const setBar = (el, pct) => {
+  el.style.width = `${pct}%`;
+  el.classList.toggle("warn", pct >= 75 && pct < 90);
+  el.classList.toggle("danger", pct >= 90);
+};
+
+const renderBucket = (bucket, pctEl, barEl, resetEl) => {
+  if (!bucket) {
+    pctEl.textContent = "--";
+    resetEl.textContent = "--";
+    setBar(barEl, 0);
+    return;
+  }
+  const pct = bucket.utilization == null ? null : Math.round(bucket.utilization * 100);
+  pctEl.textContent = pct == null ? "--" : `${pct}%`;
+  setBar(barEl, pct || 0);
+  const delta = bucket.resetsAt ? bucket.resetsAt - Date.now() : null;
+  resetEl.textContent = delta == null ? "--" : `resets in ${fmtDur(delta)}`;
+};
+
 const render = (state) => {
   if (!state) return;
-  const cap = state.messageCap || 45;
-  const used = state.messagesSent || 0;
-  const remaining = Math.max(0, cap - used);
-  const pct = Math.min(100, Math.round((used / cap) * 100));
+  const hasAny = state.session || state.weekly || state.messagesSent > 0;
+  $("empty").style.display = hasAny ? "none" : "";
+  $("content").style.display = hasAny ? "" : "none";
 
-  $("used").textContent = `${used} / ${cap}`;
-  $("remaining").textContent = String(remaining);
-  $("bar").style.width = `${pct}%`;
-
-  const resetsIn = state.resetsAt ? state.resetsAt - Date.now() : null;
-  $("resets").textContent = resetsIn == null ? "--" : fmtDuration(resetsIn);
-
-  $("util").textContent =
-    typeof state.utilization === "number"
-      ? `${Math.round(state.utilization * 100)}%`
-      : "--";
-
-  const status = $("status");
-  if (state.exceeded) {
-    status.textContent = "Limit reached for this window.";
-    status.classList.add("warn");
-  } else if (remaining <= 5 && used > 0) {
-    status.textContent = "Close to the limit.";
-    status.classList.add("warn");
-  } else {
-    status.textContent = used === 0 ? "No messages tracked this window." : "";
-    status.classList.remove("warn");
+  if (hasAny) {
+    renderBucket(state.session, $("s-pct"), $("s-bar"), $("s-reset"));
+    renderBucket(state.weekly, $("w-pct"), $("w-bar"), $("w-reset"));
+    const msgs = state.messagesSent || 0;
+    $("s-msgs").textContent = msgs === 1 ? "1 message" : `${msgs} messages`;
   }
 
   $("org").textContent = state.orgId ? `org ${state.orgId.slice(0, 8)}…` : "No org detected";
-  $("seen").textContent = state.lastSeenAt ? `seen ${fmtRelative(state.lastSeenAt)}` : "";
+  $("seen").textContent = state.lastSeenAt ? fmtRel(state.lastSeenAt) : "";
 };
 
 const refresh = () => {
-  chrome.runtime.sendMessage({ type: "cu_get_state" }, (state) => render(state));
+  chrome.runtime.sendMessage({ type: "cu_get_state" }, render);
 };
 
 $("reset").addEventListener("click", () => {
@@ -66,4 +71,4 @@ chrome.runtime.onMessage.addListener((msg) => {
 });
 
 refresh();
-setInterval(refresh, 5000);
+setInterval(refresh, 3000);

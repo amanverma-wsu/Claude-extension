@@ -45,7 +45,7 @@
       }
       .hdr:active { cursor: grabbing; }
       .title { font-weight: 600; font-size: 12px; }
-      .btns { display: flex; gap: 4px; }
+      .btns { display: flex; gap: 2px; }
       .btn {
         background: transparent;
         border: none;
@@ -61,14 +61,28 @@
         .btn:hover { background: rgba(255,255,255,0.08); }
       }
       .body { padding: 8px 10px 10px; }
-      .row { display: flex; justify-content: space-between; padding: 2px 0; }
-      .label { opacity: 0.65; }
-      .value { font-variant-numeric: tabular-nums; font-weight: 500; }
+      .section { margin-bottom: 8px; }
+      .section:last-child { margin-bottom: 0; }
+      .srow {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        padding: 1px 0;
+      }
+      .slabel { opacity: 0.65; font-size: 11px; }
+      .sval { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 13px; }
+      .sub {
+        display: flex;
+        justify-content: space-between;
+        font-size: 10.5px;
+        opacity: 0.6;
+        margin-top: 2px;
+      }
       .bar-wrap {
         height: 5px;
         background: rgba(0,0,0,0.08);
         border-radius: 3px;
-        margin: 6px 0 4px;
+        margin: 4px 0 2px;
         overflow: hidden;
       }
       @media (prefers-color-scheme: dark) {
@@ -77,34 +91,22 @@
       .bar { height: 100%; width: 0; background: #c96442; transition: width 200ms ease; }
       .bar.warn { background: #d97757; }
       .bar.danger { background: #b54a2d; }
-      .status {
-        font-size: 10.5px;
-        opacity: 0.65;
-        margin-top: 4px;
-        min-height: 12px;
-      }
-      .status.warn { color: #c96442; opacity: 1; }
+      .muted { opacity: 0.6; font-size: 11px; text-align: center; padding: 6px 0; }
+      .mini { display: none; padding: 2px 6px; font-size: 11px; font-variant-numeric: tabular-nums; }
       .collapsed .body { display: none; }
-      .collapsed { width: auto; }
       .collapsed .hdr { border-bottom: none; }
-      .mini {
-        display: none;
-        padding: 2px 8px 2px 4px;
-        font-size: 11px;
-        font-variant-numeric: tabular-nums;
-      }
       .collapsed .mini { display: inline; }
-      .reopen {
-        position: fixed;
-        top: 16px;
-        right: 16px;
-        background: rgba(255,255,255,0.9);
-        border: 1px solid #e6e4df;
-        border-radius: 20px;
-        padding: 4px 10px;
-        font-size: 11px;
-        cursor: pointer;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      .foot {
+        display: flex;
+        justify-content: space-between;
+        font-size: 10px;
+        opacity: 0.55;
+        padding-top: 6px;
+        border-top: 1px solid rgba(0,0,0,0.05);
+        margin-top: 6px;
+      }
+      @media (prefers-color-scheme: dark) {
+        .foot { border-top-color: rgba(255,255,255,0.06); }
       }
     </style>
     <div class="panel" part="panel">
@@ -117,12 +119,23 @@
         </div>
       </div>
       <div class="body">
-        <div class="row"><span class="label">Used</span><span class="value" id="used">--</span></div>
-        <div class="row"><span class="label">Remaining</span><span class="value" id="remaining">--</span></div>
-        <div class="bar-wrap"><div class="bar" id="bar"></div></div>
-        <div class="row"><span class="label">Resets in</span><span class="value" id="resets">--</span></div>
-        <div class="row"><span class="label">Utilization</span><span class="value" id="util">--</span></div>
-        <div class="status" id="status"></div>
+        <div id="empty" class="muted">Open Settings → Usage on claude.ai to populate.</div>
+        <div id="content" style="display:none;">
+          <div class="section" id="session-section">
+            <div class="srow"><span class="slabel">Current session</span><span class="sval" id="s-pct">--</span></div>
+            <div class="bar-wrap"><div class="bar" id="s-bar"></div></div>
+            <div class="sub"><span id="s-msgs">--</span><span id="s-reset">--</span></div>
+          </div>
+          <div class="section" id="weekly-section">
+            <div class="srow"><span class="slabel">Weekly</span><span class="sval" id="w-pct">--</span></div>
+            <div class="bar-wrap"><div class="bar" id="w-bar"></div></div>
+            <div class="sub"><span></span><span id="w-reset">--</span></div>
+          </div>
+          <div class="foot">
+            <span id="org"></span>
+            <span id="seen"></span>
+          </div>
+        </div>
       </div>
     </div>
   `;
@@ -135,46 +148,64 @@
     if (ms == null) return "--";
     if (ms <= 0) return "now";
     const s = Math.floor(ms / 1000);
-    const h = Math.floor(s / 3600);
+    const d = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
     const m = Math.floor((s % 3600) / 60);
+    if (d > 0) return `${d}d ${h}h`;
     if (h > 0) return `${h}h ${m}m`;
     if (m > 0) return `${m}m`;
     return `${s}s`;
   };
 
+  const fmtRel = (ts) => {
+    if (!ts) return "";
+    const diff = Date.now() - ts;
+    if (diff < 60_000) return "just now";
+    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+    return `${Math.floor(diff / 3_600_000)}h ago`;
+  };
+
+  const setBar = (el, pct) => {
+    el.style.width = `${pct}%`;
+    el.classList.toggle("warn", pct >= 75 && pct < 90);
+    el.classList.toggle("danger", pct >= 90);
+  };
+
+  const renderBucket = (bucket, pctEl, barEl, resetEl) => {
+    if (!bucket) {
+      pctEl.textContent = "--";
+      resetEl.textContent = "--";
+      setBar(barEl, 0);
+      return;
+    }
+    const pct = bucket.utilization == null ? null : Math.round(bucket.utilization * 100);
+    pctEl.textContent = pct == null ? "--" : `${pct}%`;
+    setBar(barEl, pct || 0);
+    const delta = bucket.resetsAt ? bucket.resetsAt - Date.now() : null;
+    resetEl.textContent = delta == null ? "--" : `resets in ${fmtDur(delta)}`;
+  };
+
   const render = (state) => {
     if (!state) return;
-    const cap = state.messageCap || 45;
-    const used = state.messagesSent || 0;
-    const remaining = Math.max(0, cap - used);
-    const pct = Math.min(100, Math.round((used / cap) * 100));
+    const hasAny = state.session || state.weekly || state.messagesSent > 0;
+    $("empty").style.display = hasAny ? "none" : "";
+    $("content").style.display = hasAny ? "" : "none";
+    if (!hasAny) return;
 
-    $("used").textContent = `${used} / ${cap}`;
-    $("remaining").textContent = String(remaining);
-    const bar = $("bar");
-    bar.style.width = `${pct}%`;
-    bar.classList.toggle("warn", pct >= 75 && pct < 90);
-    bar.classList.toggle("danger", pct >= 90);
+    renderBucket(state.session, $("s-pct"), $("s-bar"), $("s-reset"));
+    renderBucket(state.weekly, $("w-pct"), $("w-bar"), $("w-reset"));
 
-    $("resets").textContent = state.resetsAt ? fmtDur(state.resetsAt - Date.now()) : "--";
-    $("util").textContent =
-      typeof state.utilization === "number"
-        ? `${Math.round(state.utilization * 100)}%`
-        : "--";
+    const msgs = state.messagesSent || 0;
+    $("s-msgs").textContent = msgs === 1 ? "1 message" : `${msgs} messages`;
 
-    $("mini").textContent = `${used}/${cap}`;
+    const miniText =
+      state.session && state.session.utilization != null
+        ? `${Math.round(state.session.utilization * 100)}%`
+        : `${msgs} msg`;
+    $("mini").textContent = miniText;
 
-    const status = $("status");
-    if (state.exceeded) {
-      status.textContent = "Limit reached for this window.";
-      status.classList.add("warn");
-    } else if (remaining <= 5 && used > 0) {
-      status.textContent = "Close to the limit.";
-      status.classList.add("warn");
-    } else {
-      status.textContent = used === 0 ? "Waiting for activity…" : "";
-      status.classList.remove("warn");
-    }
+    $("org").textContent = state.orgId ? `org ${state.orgId.slice(0, 8)}…` : "";
+    $("seen").textContent = state.lastSeenAt ? fmtRel(state.lastSeenAt) : "";
   };
 
   const refresh = () => {

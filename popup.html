@@ -10,24 +10,19 @@
       <button id="reset" title="Reset tracked state">Reset</button>
     </header>
     <section class="card">
-      <div class="row">
-        <span class="label">Messages used</span>
-        <span id="used" class="value">--</span>
+      <div id="empty" class="muted">Open Settings → Usage on claude.ai to populate this panel.</div>
+      <div id="content" style="display:none;">
+        <div class="block">
+          <div class="row"><span class="label">Current session</span><span id="s-pct" class="value">--</span></div>
+          <div class="progress"><div id="s-bar" class="bar"></div></div>
+          <div class="sub"><span id="s-msgs">--</span><span id="s-reset">--</span></div>
+        </div>
+        <div class="block">
+          <div class="row"><span class="label">Weekly</span><span id="w-pct" class="value">--</span></div>
+          <div class="progress"><div id="w-bar" class="bar"></div></div>
+          <div class="sub"><span></span><span id="w-reset">--</span></div>
+        </div>
       </div>
-      <div class="row">
-        <span class="label">Estimated remaining</span>
-        <span id="remaining" class="value">--</span>
-      </div>
-      <div class="progress"><div id="bar"></div></div>
-      <div class="row">
-        <span class="label">Window resets in</span>
-        <span id="resets" class="value">--</span>
-      </div>
-      <div class="row">
-        <span class="label">Utilization</span>
-        <span id="util" class="value">--</span>
-      </div>
-      <div id="status" class="status"></div>
     </section>
     <footer>
       <span id="org" class="muted">No org detected</span>

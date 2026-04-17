@@ -27,27 +27,39 @@
     return m ? m[1] : null;
   };
 
-  const KEYS = [
-    "utilization", "remaining", "resets_at", "reset_at",
-    "exceeded_limit", "message_limit", "five_hour_limit",
-    "limit", "used", "type"
-  ];
-
   const scanForUsage = (url, data) => {
     if (!data || typeof data !== "object") return;
-    const hit = {};
-    const walk = (node, depth) => {
-      if (depth > 6 || !node) return;
-      if (Array.isArray(node)) { for (const v of node) walk(v, depth + 1); return; }
+    const buckets = [];
+    const walk = (node, path, depth) => {
+      if (depth > 8 || !node) return;
+      if (Array.isArray(node)) {
+        for (let i = 0; i < node.length; i++) walk(node[i], path, depth + 1);
+        return;
+      }
       if (typeof node !== "object") return;
+      const util = node.utilization;
+      const reset = node.resets_at || node.reset_at;
+      if (typeof util === "number" && reset) {
+        buckets.push({
+          parentKey: path[path.length - 1] || "",
+          pathStr: path.join("."),
+          utilization: util,
+          resetsAt: reset
+        });
+      }
       for (const k of Object.keys(node)) {
-        if (KEYS.includes(k)) hit[k] = node[k];
-        walk(node[k], depth + 1);
+        walk(node[k], path.concat(k), depth + 1);
       }
     };
-    walk(data, 0);
-    if (Object.keys(hit).length > 0) {
-      emit({ kind: "usage", url, orgId: extractOrgId(url), data: hit, seenAt: Date.now() });
+    walk(data, [], 0);
+    if (buckets.length > 0) {
+      emit({
+        kind: "usage_buckets",
+        url,
+        orgId: extractOrgId(url),
+        buckets,
+        seenAt: Date.now()
+      });
     }
   };
 
