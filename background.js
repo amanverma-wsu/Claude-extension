@@ -20,6 +20,13 @@ const saveState = (s) => chrome.storage.local.set({ [STATE_KEY]: s });
 
 const broadcast = (state) => {
   chrome.runtime.sendMessage({ type: "cu_state", state }).catch(() => {});
+  chrome.tabs.query({ url: "https://claude.ai/*" }, (tabs) => {
+    for (const t of tabs || []) {
+      if (t.id != null) {
+        chrome.tabs.sendMessage(t.id, { type: "cu_state", state }).catch(() => {});
+      }
+    }
+  });
 };
 
 const rollWindowIfNeeded = (state, now) => {
