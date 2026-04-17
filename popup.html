@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Claude Usage</h1>
+      <button id="reset" title="Reset tracked state">Reset</button>
+    </header>
+    <section class="card">
+      <div class="row">
+        <span class="label">Messages used</span>
+        <span id="used" class="value">--</span>
+      </div>
+      <div class="row">
+        <span class="label">Estimated remaining</span>
+        <span id="remaining" class="value">--</span>
+      </div>
+      <div class="progress"><div id="bar"></div></div>
+      <div class="row">
+        <span class="label">Window resets in</span>
+        <span id="resets" class="value">--</span>
+      </div>
+      <div class="row">
+        <span class="label">Utilization</span>
+        <span id="util" class="value">--</span>
+      </div>
+      <div id="status" class="status"></div>
+    </section>
+    <footer>
+      <span id="org" class="muted">No org detected</span>
+      <span id="seen" class="muted"></span>
+    </footer>
+    <script src="popup.js"></script>
+  </body>
+</html>
