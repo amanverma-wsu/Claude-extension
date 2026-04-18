@@ -60,8 +60,47 @@
         buckets,
         seenAt: Date.now()
       });
+      emit({ kind: "endpoint_learned", url });
+      if (!pollUrl) startPolling(url);
     }
   };
+
+  let pollUrl = null;
+  let pollTimer = null;
+  const POLL_MS = 60_000;
+
+  const pollOnce = () => {
+    if (!pollUrl) return;
+    try {
+      origFetch.call(window, pollUrl, {
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "accept": "application/json" }
+      }).then((r) => {
+        if (!r.ok) return;
+        return r.clone().text().then((t) => {
+          const parsed = safeJSON(t);
+          if (parsed) scanForUsage(pollUrl, parsed);
+        });
+      }).catch(() => {});
+    } catch (_) {}
+  };
+
+  const startPolling = (url) => {
+    pollUrl = url;
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(() => {
+      if (document.hidden) return;
+      pollOnce();
+    }, POLL_MS);
+    pollOnce();
+  };
+
+  window.addEventListener("__cu_poll_request__", (e) => {
+    const u = e && e.detail && e.detail.url;
+    if (u && u !== pollUrl) startPolling(u);
+    else if (u) pollOnce();
+  });
 
   const origFetch = window.fetch;
   window.fetch = async function (input, init) {

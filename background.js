@@ -1,4 +1,5 @@
 const STATE_KEY = "cu_tracker_state";
+const ENDPOINT_KEY = "cu_usage_endpoint";
 const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
 
 const emptyState = () => ({
@@ -81,6 +82,20 @@ const handleEvent = async (payload) => {
     }
   }
 
+  if (payload.kind === "endpoint_learned" && payload.url) {
+    const { [ENDPOINT_KEY]: prev } = await chrome.storage.local.get(ENDPOINT_KEY);
+    if (prev !== payload.url) {
+      await chrome.storage.local.set({ [ENDPOINT_KEY]: payload.url });
+      chrome.tabs.query({ url: "https://claude.ai/*" }, (tabs) => {
+        for (const t of tabs || []) {
+          if (t.id != null) {
+            chrome.tabs.sendMessage(t.id, { type: "cu_start_polling", url: payload.url }).catch(() => {});
+          }
+        }
+      });
+    }
+  }
+
   if (payload.kind === "usage_buckets" && Array.isArray(payload.buckets)) {
     for (const raw of payload.buckets) {
       const resetsAt = parseResets(raw.resetsAt);
@@ -109,6 +124,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg && msg.type === "cu_reset") {
     saveState(emptyState()).then(() => sendResponse({ ok: true }));
+    return true;
+  }
+  if (msg && msg.type === "cu_get_endpoint") {
+    chrome.storage.local.get(ENDPOINT_KEY).then((r) => {
+      sendResponse({ url: r[ENDPOINT_KEY] || null });
+    });
     return true;
   }
 });
