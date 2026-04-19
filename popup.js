@@ -1,4 +1,7 @@
 const $ = (id) => document.getElementById(id);
+const REFRESH_MS = 15_000;
+const LIVE_TICK_MS = 1_000;
+let lastState = null;
 
 const fmtDur = (ms) => {
   if (ms == null) return "--";
@@ -43,6 +46,7 @@ const renderBucket = (bucket, pctEl, barEl, resetEl) => {
 
 const render = (state) => {
   if (!state) return;
+  lastState = state;
   const hasAny = state.session || state.weekly || state.messagesSent > 0;
   $("empty").style.display = hasAny ? "none" : "";
   $("content").style.display = hasAny ? "" : "none";
@@ -59,7 +63,10 @@ const render = (state) => {
 };
 
 const refresh = () => {
-  chrome.runtime.sendMessage({ type: "cu_get_state" }, render);
+  chrome.runtime.sendMessage({ type: "cu_get_state" }, (state) => {
+    if (chrome.runtime.lastError) return;
+    render(state);
+  });
 };
 
 $("reset").addEventListener("click", () => {
@@ -71,4 +78,7 @@ chrome.runtime.onMessage.addListener((msg) => {
 });
 
 refresh();
-setInterval(refresh, 3000);
+setInterval(refresh, REFRESH_MS);
+setInterval(() => {
+  if (lastState) render(lastState);
+}, LIVE_TICK_MS);

@@ -13,6 +13,20 @@
 
   const safeJSON = (t) => { try { return JSON.parse(t); } catch { return null; } };
 
+  const resolveUrl = (input) => {
+    try {
+      if (typeof input === "string") return new URL(input, window.location.href).toString();
+      if (input instanceof URL) return input.toString();
+      if (typeof Request !== "undefined" && input instanceof Request) return input.url || "";
+      if (input && typeof input === "object" && input.url) {
+        return new URL(input.url, window.location.href).toString();
+      }
+    } catch (_) {}
+    return typeof input === "string" ? input : (input && input.url) || "";
+  };
+
+  const isSuccessfulStatus = (status) => Number.isInteger(status) && status >= 200 && status < 300;
+
   const isClaudeApi = (url) => {
     if (!url) return false;
     if (url.startsWith("/api/")) return true;
@@ -27,6 +41,10 @@
     return m ? m[1] : null;
   };
 
+  const emitMessageSent = (url) => {
+    emit({ kind: "message_sent", url, orgId: extractOrgId(url), seenAt: Date.now() });
+  };
+
   const scanForUsage = (url, data) => {
     if (!data || typeof data !== "object") return;
     const buckets = [];
@@ -38,7 +56,7 @@
       }
       if (typeof node !== "object") return;
       const util = node.utilization;
-      const reset = node.resets_at || node.reset_at;
+      const reset = node.resets_at || node.reset_at || node.resetsAt || node.resetAt;
       if (typeof util === "number" && reset) {
         buckets.push({
           parentKey: path[path.length - 1] || "",
@@ -67,7 +85,15 @@
 
   let pollUrl = null;
   let pollTimer = null;
-  const POLL_MS = 60_000;
+  const POLL_MS = 15_000;
+
+  const stopPolling = () => {
+    pollUrl = null;
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  };
 
   const pollOnce = () => {
     if (!pollUrl) return;
@@ -97,14 +123,24 @@
   };
 
   window.addEventListener("__cu_poll_request__", (e) => {
+    if (e && e.detail && e.detail.stop) {
+      stopPolling();
+      return;
+    }
     const u = e && e.detail && e.detail.url;
     if (u && u !== pollUrl) startPolling(u);
     else if (u) pollOnce();
   });
 
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      pollOnce();
+    }
+  });
+
   const origFetch = window.fetch;
   window.fetch = async function (input, init) {
-    const url = typeof input === "string" ? input : (input && input.url) || "";
+    const url = resolveUrl(input);
     const method =
       (init && init.method) ||
       (input && typeof input === "object" && input.method) ||
@@ -113,13 +149,12 @@
     const completion = api && isCompletion(url);
     const isPost = String(method).toUpperCase() === "POST";
 
-    if (api && isPost && completion) {
-      emit({ kind: "message_sent", url, orgId: extractOrgId(url), seenAt: Date.now() });
-    }
-
     const response = await origFetch.apply(this, arguments);
 
     try {
+      if (api && isPost && completion && response.ok) {
+        emitMessageSent(url);
+      }
       if (api) {
         const ct = response.headers.get("content-type") || "";
         if (ct.includes("application/json")) {
@@ -145,19 +180,20 @@
     };
     const send = xhr.send;
     xhr.send = function (...args) {
-      try {
-        if (isClaudeApi(_url) && String(_method).toUpperCase() === "POST" && isCompletion(_url)) {
-          emit({ kind: "message_sent", url: _url, orgId: extractOrgId(_url), seenAt: Date.now() });
-        }
-      } catch (_) {}
       return send.apply(this, args);
     };
     xhr.addEventListener("load", () => {
       try {
+        if (isClaudeApi(_url) && String(_method).toUpperCase() === "POST" && isCompletion(_url) && isSuccessfulStatus(xhr.status)) {
+          emitMessageSent(_url);
+        }
         if (!isClaudeApi(_url)) return;
         const ct = xhr.getResponseHeader("content-type") || "";
         if (ct.includes("application/json")) {
-          const parsed = safeJSON(xhr.responseText);
+          const parsed =
+            xhr.responseType === "json" && xhr.response && typeof xhr.response === "object"
+              ? xhr.response
+              : safeJSON(xhr.responseText);
           if (parsed) scanForUsage(_url, parsed);
         }
       } catch (_) {}

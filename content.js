@@ -13,6 +13,10 @@
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg && msg.type === "cu_start_polling" && msg.url) {
       window.dispatchEvent(new CustomEvent(POLL_EVT, { detail: { url: msg.url } }));
+      return;
+    }
+    if (msg && msg.type === "cu_stop_polling") {
+      window.dispatchEvent(new CustomEvent(POLL_EVT, { detail: { stop: true } }));
     }
   });
 

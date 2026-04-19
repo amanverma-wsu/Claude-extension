@@ -1,6 +1,7 @@
 const STATE_KEY = "cu_tracker_state";
 const ENDPOINT_KEY = "cu_usage_endpoint";
 const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
+let mutationQueue = Promise.resolve();
 
 const emptyState = () => ({
   orgId: null,
@@ -18,15 +19,40 @@ const loadState = async () => {
 
 const saveState = (s) => chrome.storage.local.set({ [STATE_KEY]: s });
 
-const broadcast = (state) => {
-  chrome.runtime.sendMessage({ type: "cu_state", state }).catch(() => {});
+const queueMutation = (label, job) => {
+  const run = async () => {
+    try {
+      return await job();
+    } catch (error) {
+      console.error(`[claude-usage] ${label} failed`, error);
+      throw error;
+    }
+  };
+  const queued = mutationQueue.then(run, run);
+  mutationQueue = queued.catch(() => {});
+  return queued;
+};
+
+const sendToClaudeTabs = (message) => {
   chrome.tabs.query({ url: "https://claude.ai/*" }, (tabs) => {
     for (const t of tabs || []) {
       if (t.id != null) {
-        chrome.tabs.sendMessage(t.id, { type: "cu_state", state }).catch(() => {});
+        chrome.tabs.sendMessage(t.id, message).catch(() => {});
       }
     }
   });
+};
+
+const broadcast = (state) => {
+  chrome.runtime.sendMessage({ type: "cu_state", state }).catch(() => {});
+  sendToClaudeTabs({ type: "cu_state", state });
+};
+
+const requestUsageRefresh = async () => {
+  const { [ENDPOINT_KEY]: url } = await chrome.storage.local.get(ENDPOINT_KEY);
+  if (url) {
+    sendToClaudeTabs({ type: "cu_start_polling", url });
+  }
 };
 
 const parseResets = (raw) => {
@@ -86,13 +112,7 @@ const handleEvent = async (payload) => {
     const { [ENDPOINT_KEY]: prev } = await chrome.storage.local.get(ENDPOINT_KEY);
     if (prev !== payload.url) {
       await chrome.storage.local.set({ [ENDPOINT_KEY]: payload.url });
-      chrome.tabs.query({ url: "https://claude.ai/*" }, (tabs) => {
-        for (const t of tabs || []) {
-          if (t.id != null) {
-            chrome.tabs.sendMessage(t.id, { type: "cu_start_polling", url: payload.url }).catch(() => {});
-          }
-        }
-      });
+      sendToClaudeTabs({ type: "cu_start_polling", url: payload.url });
     }
   }
 
@@ -110,11 +130,15 @@ const handleEvent = async (payload) => {
 
   await saveState(state);
   broadcast(state);
+
+  if (payload.kind === "message_sent") {
+    await requestUsageRefresh();
+  }
 };
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg && msg.type === "cu_tracker") {
-    handleEvent(msg.payload);
+    queueMutation("tracker event", () => handleEvent(msg.payload));
     sendResponse({ ok: true });
     return true;
   }
@@ -123,7 +147,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg && msg.type === "cu_reset") {
-    saveState(emptyState()).then(() => sendResponse({ ok: true }));
+    queueMutation("reset", async () => {
+      const state = emptyState();
+      await chrome.storage.local.remove(ENDPOINT_KEY);
+      await saveState(state);
+      sendToClaudeTabs({ type: "cu_stop_polling" });
+      broadcast(state);
+    }).then(() => sendResponse({ ok: true }));
     return true;
   }
   if (msg && msg.type === "cu_get_endpoint") {
@@ -135,13 +165,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 });
 
 chrome.alarms.create("cu_tick", { periodInMinutes: 1 });
-chrome.alarms.onAlarm.addListener(async (alarm) => {
+chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== "cu_tick") return;
-  const state = await loadState();
-  const before = JSON.stringify(state);
-  rollSessionIfNeeded(state, Date.now());
-  if (JSON.stringify(state) !== before) {
-    await saveState(state);
-  }
-  broadcast(state);
+  queueMutation("alarm tick", async () => {
+    const state = await loadState();
+    const before = JSON.stringify(state);
+    rollSessionIfNeeded(state, Date.now());
+    if (JSON.stringify(state) !== before) {
+      await saveState(state);
+    }
+    broadcast(state);
+  });
 });

@@ -4,6 +4,8 @@
 
   const POS_KEY = "cu_overlay_pos";
   const HIDDEN_KEY = "cu_overlay_hidden";
+  const REFRESH_MS = 15_000;
+  const LIVE_TICK_MS = 1_000;
 
   const host = document.createElement("div");
   host.id = "cu-usage-overlay-host";
@@ -143,6 +145,8 @@
   const $ = (id) => shadow.getElementById(id);
   const panel = shadow.querySelector(".panel");
   const hdr = $("hdr");
+  let lastState = null;
+  const isMounted = () => host.isConnected && panel && panel.isConnected;
 
   const fmtDur = (ms) => {
     if (ms == null) return "--";
@@ -187,10 +191,16 @@
 
   const render = (state) => {
     if (!state) return;
+    lastState = state;
     const hasAny = state.session || state.weekly || state.messagesSent > 0;
     $("empty").style.display = hasAny ? "none" : "";
     $("content").style.display = hasAny ? "" : "none";
-    if (!hasAny) return;
+    if (!hasAny) {
+      $("mini").textContent = "--";
+      $("org").textContent = "";
+      $("seen").textContent = "";
+      return;
+    }
 
     renderBucket(state.session, $("s-pct"), $("s-bar"), $("s-reset"));
     renderBucket(state.weekly, $("w-pct"), $("w-bar"), $("w-reset"));
@@ -223,25 +233,43 @@
 
   let dragging = false;
   let sx = 0, sy = 0, ox = 0, oy = 0;
+  const clampPosition = (left, top) => {
+    const safeLeft = Number.isFinite(left) ? left : 0;
+    const safeTop = Number.isFinite(top) ? top : 0;
+    if (!isMounted()) {
+      return { left: safeLeft, top: safeTop };
+    }
+    const rect = panel.getBoundingClientRect();
+    const maxLeft = Math.max(0, window.innerWidth - rect.width);
+    const maxTop = Math.max(0, window.innerHeight - rect.height);
+    return {
+      left: Math.max(0, Math.min(maxLeft, safeLeft)),
+      top: Math.max(0, Math.min(maxTop, safeTop))
+    };
+  };
+
+  const applyPosition = (left, top) => {
+    if (!isMounted()) return { left, top };
+    const next = clampPosition(left, top);
+    host.style.right = "auto";
+    host.style.left = `${next.left}px`;
+    host.style.top = `${next.top}px`;
+    return next;
+  };
 
   hdr.addEventListener("mousedown", (e) => {
-    if (e.target.closest(".btn")) return;
+    if (e.target instanceof Element && e.target.closest(".btn")) return;
     dragging = true;
     const rect = host.getBoundingClientRect();
     sx = e.clientX; sy = e.clientY;
     ox = rect.left; oy = rect.top;
-    host.style.right = "auto";
-    host.style.left = `${ox}px`;
-    host.style.top = `${oy}px`;
+    applyPosition(ox, oy);
     e.preventDefault();
   });
 
   window.addEventListener("mousemove", (e) => {
     if (!dragging) return;
-    const nx = Math.max(0, Math.min(window.innerWidth - 40, ox + (e.clientX - sx)));
-    const ny = Math.max(0, Math.min(window.innerHeight - 40, oy + (e.clientY - sy)));
-    host.style.left = `${nx}px`;
-    host.style.top = `${ny}px`;
+    applyPosition(ox + (e.clientX - sx), oy + (e.clientY - sy));
   });
 
   window.addEventListener("mouseup", () => {
@@ -249,6 +277,14 @@
     dragging = false;
     const r = host.getBoundingClientRect();
     chrome.storage.local.set({ [POS_KEY]: { left: r.left, top: r.top } });
+  });
+
+  window.addEventListener("resize", () => {
+    const left = parseFloat(host.style.left);
+    const top = parseFloat(host.style.top);
+    if (Number.isFinite(left) && Number.isFinite(top)) {
+      applyPosition(left, top);
+    }
   });
 
   $("collapse").addEventListener("click", () => {
@@ -282,9 +318,7 @@
   chrome.storage.local.get([POS_KEY, HIDDEN_KEY], (res) => {
     const pos = res[POS_KEY];
     if (pos) {
-      host.style.right = "auto";
-      host.style.left = `${pos.left}px`;
-      host.style.top = `${pos.top}px`;
+      applyPosition(pos.left, pos.top);
     }
     if (res[HIDDEN_KEY]) {
       host.style.display = "none";
@@ -293,5 +327,8 @@
   });
 
   refresh();
-  setInterval(refresh, 3000);
+  setInterval(refresh, REFRESH_MS);
+  setInterval(() => {
+    if (lastState) render(lastState);
+  }, LIVE_TICK_MS);
 })();
